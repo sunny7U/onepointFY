@@ -10,7 +10,7 @@ public class LogUtil {
 	public static final int WARN=4;   //出现了不影响系统继续运行的问题，如资源没有释放，数据库没有关闭
 	public static final int ERROR=5;  //出现的问题可能会影响到系统正常工作，空指针异常等严重错误
 	public static final int NOTHING=6;
-	public static final int LEVEL=NOTHING;
+	public static final int LEVEL=VERBOSE;
 	
 	public static void v(String tag,String msg){
 		if(LEVEL<=VERBOSE){

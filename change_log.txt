@@ -1,0 +1,14 @@
+2016/4/16 单点最终版本
+改进小蓝点方向：360-arg0.getBearing();
+增加备注栏
+调整途经点title和snippet显示
+
+改进小蓝点方向：360-arg0.getBearing();
+增加备注栏
+调整途经点title和snippet显示
+
+2016/7/10  添加拍照录音及上传功能
+拍照   OK
+录音   OK
+上传   显示ProgressDialog并提示上传结果
+

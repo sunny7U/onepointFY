@@ -2,13 +2,23 @@ package com.ll.data;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.ProgressDialog;
 import android.content.ContentValues;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.media.MediaPlayer;
+import android.media.MediaRecorder;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Message;
+import android.provider.MediaStore;
+import android.text.Html;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
@@ -16,6 +26,8 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.View.OnClickListener;
+import android.view.ViewTreeObserver;
+import android.view.ViewTreeObserver.OnGlobalLayoutListener;
 import android.view.Window;
 import android.widget.AdapterView;
 import android.widget.AdapterView.OnItemSelectedListener;
@@ -30,20 +42,31 @@ import android.widget.Spinner;
 import android.widget.TabHost;
 import android.widget.TabHost.OnTabChangeListener;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Field;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 
+import com.amap.api.mapcore.util.bu;
 import com.amap.api.maps.model.LatLng;
+import com.amap.api.maps.offlinemap.file.Utility;
 import com.ll.Zxing.CaptureActivity;
 import com.ll.data.SearchResultDialog.OnListItemClick;
 import com.ll.utils.AMapUtil;
 import com.ll.utils.LogUtil;
+import com.ll.utils.FileUtil;
 import com.ll.utils.PoiItem;
 import com.ll.utils.ToastUtil;
+import com.ll.utils.UploadUtil;
 import com.ll.R;
 
 /**
@@ -51,8 +74,50 @@ import com.ll.R;
  * @author Administrator
  */
 public class TabhostActivity extends Activity implements OnClickListener,
-        OnItemSelectedListener{
+        OnItemSelectedListener, UploadUtil.OnUploadProcessListener{
     private String TAG=TabhostActivity.class.getName();
+    //request codes
+    private static final int REQUEST_IMAGE_CAPTURE = 100;
+    private static final int REQUEST_AUDIO_RECODE = 200;
+
+    private MediaRecorder mRecorder;
+    private MediaPlayer mPlayer;
+    private int recordFlag = 0; //0表示未开始录音，1表示正在录音中
+    //file url to store image/audio
+    private Uri fileUri;
+    private File mCurrentFile;  //表示最新拍得的图片或录制的语音的文件地址
+    
+    /**
+     * 去上传文件
+     */
+    public static final int TO_UPLOAD_FILE = 1;
+    /**
+     * 上传文件响应
+     */
+    public static final int UPLOAD_FILE_DONE = 2;  //
+    /**
+     * 选择文件
+     */
+    public static final int TO_SELECT_PHOTO = 3;
+    /**
+     * 上传初始化
+     */
+    public static final int UPLOAD_INIT_PROCESS = 4;
+    /**
+     * 上传中
+     */
+    public static final int UPLOAD_IN_PROCESS = 5;
+    /**
+     * 取消上传
+     */
+    public static final int UPLOAD_CANCELLED = 6;
+    /***
+     * 这里的这个URL是我服务器的javaEE环境URL
+     */
+    public static String FILE_UPLOAD_URL = "http://10.8.165.213:8080/api/";
+
+    
+    
     String point; //用于记录当前显示出来的经纬度点
     double[] lnglat=new double[2];
     String disNum,disName; //用于传递台区编码和台区名称
@@ -81,6 +146,13 @@ public class TabhostActivity extends Activity implements OnClickListener,
     private Button mSaveUserButton;
     private Button mCancelUserButton;
     private TextView mScanResultTextView;
+    private TextView mPhotoTextView;
+    private Button mPhotoButton;
+    private TextView mAudioTextView;
+    private Button mAudioButton;
+    private ImageView mImageView;
+    private ProgressDialog mProgressDialog;
+    private TextView mHint;
     
     //第二个tab页，以其他位置为采集点
     private EditText mLocDescEditText;
@@ -128,13 +200,83 @@ public class TabhostActivity extends Activity implements OnClickListener,
     	super.onResume();
 		mTabHost.getTabWidget().getChildAt(0).setBackgroundColor(Color.parseColor("#B0E2FF"));
     }
+    
+    /**
+     * Here we store the file url as it will be null after returning from camera
+     * app
+     */
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        // save file url in bundle as it will be null on screen orientation changes
+        outState.putParcelable("file_uri", fileUri);
+    }
 
+    @Override
+    protected void onRestoreInstanceState(Bundle savedInstanceState) {
+        super.onRestoreInstanceState(savedInstanceState);
+
+        // get the file url
+        fileUri = savedInstanceState.getParcelable("file_uri");
+    }
+
+    /**
+     * 1/Android相机应用会把拍好的照片编码为缩小的Bitmap，然后以extra value的方式添加到返回的Intent中，并传送给onActivityResult()
+     * 取出Intent中的Bundle，图片对应的key为“data";但是将图片写入到File之后，Bundle中将不会有bitmap返回，Intent为null，所以要从File中加载图像
+     * 2/对CaptureActivity返回的扫描结果做处理
+     */
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+    	// TODO Auto-generated method stub
+    	super.onActivityResult(requestCode, resultCode, data);
+    	if (requestCode == REQUEST_IMAGE_CAPTURE) {
+            if (resultCode == RESULT_OK) {
+            	if (mCurrentFile != null) {
+            		mPhotoTextView.setText(Html.fromHtml("<u>"+mCurrentFile.getName()+"</u>"));
+            		mPhotoTextView.setTextColor(getResources().getColor(R.color.light_blue));
+            		mPhotoTextView.setClickable(true);
+            		mPhotoTextView.setOnClickListener(TabhostActivity.this);
+            		mImageView.setVisibility(View.VISIBLE);
+            		mImageView.setImageBitmap(loadImageFromFile(mCurrentFile.getAbsolutePath()));
+            	}
+                mCurrentFile = null;
+            } else if (resultCode == RESULT_CANCELED) {
+                ToastUtil.show(this, "User cancelled image capture");
+            } else {
+            	ToastUtil.show(this, "Failed to capture image");
+            }
+
+        } else if (requestCode == REQUEST_AUDIO_RECODE && resultCode == RESULT_OK) {
+            if (resultCode == RESULT_OK) {
+            	
+            } else if (resultCode == RESULT_CANCELED) {
+            	ToastUtil.show(this, "User cancelled audio capture");
+            } else {
+            	ToastUtil.show(this, "Failed to record audio");
+            }
+        } else {
+        	if (resultCode==RESULT_FIRST_USER) {
+        		Bundle bundle=data.getExtras();
+       		 	String scan_result=bundle.getString("scan_result").trim();
+       		 	LogUtil.i(TAG, "scan_result="+scan_result+", requestCode="+requestCode);
+       		 	if( scan_result!=null && !"".equals(scan_result)){
+       		 		//requestCode为1表示返回的scan_result是用户ID,为3表示返回的是表计局号
+       		 		queryData(scan_result, requestCode);
+       		 		searchFlag=0;
+       		 	}
+        	}
+        }
+    	
+    }
+    
     @Override
     protected void onDestroy() {
         // TODO Auto-generated method stub
         LogUtil.d(TAG, "onDestroy");
         super.onDestroy();
     }
+    
+    
 /*-------------------------------初始化操作------------------------------------*/
     /**
      * 界面布局及spinner数据初始化
@@ -181,11 +323,21 @@ public class TabhostActivity extends Activity implements OnClickListener,
         mSaveUserButton=(Button)findViewById(R.id.save_btn);
         mCancelUserButton=(Button)findViewById(R.id.cancel_btn);
         mScanResultTextView=(TextView)findViewById(R.id.scan2_et);
+        mPhotoTextView=(TextView)findViewById(R.id.photo_addr_tv);
+        mPhotoButton=(Button)findViewById(R.id.take_photo_btn);
+        mAudioTextView=(TextView)findViewById(R.id.audio_addr_tv);
+        mAudioButton=(Button)findViewById(R.id.record_audio_btn);
+        mImageView=(ImageView)findViewById(R.id.imgae_iv);
+        mImageView.setVisibility(View.GONE);
         
         mSearchUserButton.setOnClickListener(this);
         mRelocateButton.setOnClickListener(this);
         mSaveUserButton.setOnClickListener(this);
         mCancelUserButton.setOnClickListener(this);
+        mPhotoButton.setOnClickListener(this);
+        mAudioButton.setOnClickListener(this);
+        
+        mProgressDialog=new ProgressDialog(this);
         
         //以其他位置为点的tab页
         mLocDescEditText=(EditText)findViewById(R.id.loc_desc_et);
@@ -298,10 +450,318 @@ public class TabhostActivity extends Activity implements OnClickListener,
             case R.id.cancel2_btn:
             	quitDirectly();
                 break;
+            case R.id.take_photo_btn:
+            	dispatchTakePictureIntent();
+            	break;
+            case R.id.record_audio_btn:
+            	if(recordFlag == 0) {
+            		if(startRecord()){
+            			mAudioButton.setText("停止录音");
+                		recordFlag = 1;
+            		}
+            	} else {
+            		stopRecord();
+            		mAudioButton.setText("开始录音");
+            		recordFlag = 0;
+            		if (mCurrentFile != null) {
+                		mAudioTextView.setText(Html.fromHtml("<u>"+mCurrentFile.getName()+"</u>"));
+                		mAudioTextView.setTextColor(getResources().getColor(R.color.light_blue));
+                		mAudioTextView.setClickable(true);
+                		mAudioTextView.setOnClickListener(TabhostActivity.this);
+                	}
+            		mCurrentFile = null;
+            	}
+            	break;
+            case R.id.photo_addr_tv:
+            	showMediaDialog(FileUtil.MEDIA_TYPE_IMAGE,
+            			mPhotoTextView.getText().toString().trim());
+            	break;
+            case R.id.audio_addr_tv:
+            	showMediaDialog(FileUtil.MEDIA_TYPE_AUDIO
+            			, mAudioTextView.getText().toString().trim());
+            	break;
             default:
                 break;
         }
     }
+/*-------------------------------拍照和录音相关函数-------------------------------*/  
+    private void dispatchTakePictureIntent() {
+    	LogUtil.d(TAG, "dispatchTakePictureIntent");
+    	String user_id = mUserIdTextView.getText().toString().trim();
+    	if(user_id != null && !user_id.equals("")) {
+    		//intent本身，传递执行目的
+            Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            //resolveActivity()会返回能处理该intent的第一个Activity，ensure that there's a camera activity to handle the intent
+            if (takePictureIntent.resolveActivity(getPackageManager()) != null) {
+                // Create the File where the image should go
+                File photoFile = FileUtil.getOutputMediaFile(FileUtil.MEDIA_TYPE_IMAGE, user_id);
+                if(photoFile != null) {
+                	mCurrentFile = photoFile;
+                }
+                // Continue only if the File was successfully created
+                if (photoFile != null) {
+                    //将图片uri存放在key为output的Extra中
+                    takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, Uri.fromFile(photoFile));
+                    startActivityForResult(takePictureIntent, REQUEST_IMAGE_CAPTURE);
+                }
+            }
+    	} else {
+    		ToastUtil.show(this, "户号不能为空");
+    	}
+        
+    }
+    
+    private boolean startRecord() {
+    	String user_id = mUserIdTextView.getText().toString().trim();
+    	if(user_id != null && !user_id.equals("")) {
+    		File audioFile = FileUtil.getOutputMediaFile(FileUtil.MEDIA_TYPE_AUDIO, user_id);
+    		if( audioFile == null || audioFile.getAbsolutePath() == null){
+                Toast.makeText(this, "文件创建失败", Toast.LENGTH_SHORT).show();
+                return false;
+            }
+    		mCurrentFile = audioFile;
+            //创建MediaRecorder对象
+            mRecorder = new MediaRecorder();
+            //设置录音的声音来源为麦克风
+            mRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+            //设置录制的声音的输出格式（必须在编码格式之前设置）
+            mRecorder.setOutputFormat(MediaRecorder.OutputFormat.RAW_AMR);
+            //设置声音编码的格式
+            mRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB);
+            mRecorder.setOutputFile(audioFile.getAbsolutePath());
+            try{
+                mRecorder.prepare();
+                mRecorder.start();
+            }catch (IllegalStateException e){
+                e.printStackTrace();
+                return false;
+            }catch (IOException e){
+                e.printStackTrace();
+                return false;
+            }
+    	} else {
+    		ToastUtil.show(this, "户号不能为空");
+    		return false;
+    	}
+    	return true;
+        
+    }
+
+    private void stopRecord(){
+        if(mRecorder != null){
+            mRecorder.stop();
+            mRecorder.release();
+        }
+        mRecorder = null;
+    }
+
+    private void playAudio(String filepath){
+        if(filepath != null){
+            try{
+                mPlayer = new MediaPlayer();
+                mPlayer.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
+                    @Override
+                    public void onCompletion(MediaPlayer mp) {
+                        mPlayer.release();
+                        mPlayer = null;
+                        return;
+                    }
+                });
+                mPlayer.setOnErrorListener(new MediaPlayer.OnErrorListener() {
+                    @Override
+                    public boolean onError(MediaPlayer mp, int what, int extra) {
+                        LogUtil.e(TAG, "Error in MediaPlayer");
+                        mPlayer.release();
+                        mPlayer = null;
+                        return false;
+                    }
+                });
+                mPlayer.setDataSource(filepath);
+                mPlayer.prepare();
+                mPlayer.start();
+            }catch (IOException E){
+                E.printStackTrace();
+            }
+
+        }
+    }
+    
+    /**
+     * 根据用户id去查询是否存在关于该用户的图片和语音，有则呈现资料地址
+     * @param user_id
+     */
+    private void readMediaFiles(String user_id){
+    	if(user_id != null && !user_id.equals("")){
+    		File photofile = FileUtil.isFileExist(FileUtil.MEDIA_TYPE_IMAGE, user_id);
+    		File audiofile = FileUtil.isFileExist(FileUtil.MEDIA_TYPE_AUDIO, user_id);
+    		if(photofile != null){
+    			mPhotoTextView.setText(Html.fromHtml("<u>"+photofile.getName()+"</u>"));
+    			mPhotoTextView.setTextColor(getResources().getColor(R.color.light_blue));
+    			mPhotoTextView.setClickable(true);
+    			mPhotoTextView.setOnClickListener(TabhostActivity.this);
+    			mImageView.setVisibility(View.VISIBLE);
+    			mImageView.setImageBitmap(loadImageFromFile(photofile.getAbsolutePath()));
+    		}else{
+    			mImageView.setVisibility(View.GONE);
+    			mPhotoTextView.setText(R.string.nothing);
+    			mPhotoTextView.setTextColor(getResources().getColor(R.color.contents_text));
+    			mPhotoTextView.setClickable(false);
+    		}
+    		if(audiofile != null){
+    			mAudioTextView.setText(Html.fromHtml("<u>"+audiofile.getName()+"</u>"));
+        		mAudioTextView.setTextColor(getResources().getColor(R.color.light_blue));
+        		mAudioTextView.setClickable(true);
+        		mAudioTextView.setOnClickListener(TabhostActivity.this);
+    		}else{
+    			mAudioTextView.setText(R.string.nothing);
+    			mAudioTextView.setTextColor(getResources().getColor(R.color.contents_text));
+    			mAudioTextView.setClickable(false);
+    		}
+    	}
+    }
+    
+    /**
+     * 从文件加载图片。通过缩放图片到目标视图尺寸后再载入到内存，来降低内存的使用
+     */
+    public Bitmap loadImageFromFile(String photoPath) {
+        if (photoPath == null || photoPath.length() < 1) {
+            return null;
+        }
+        mImageView.setVisibility(View.VISIBLE);
+        //Get the dimensions of the View
+        int targetW = mImageView.getWidth();
+        int targetH = mImageView.getHeight();
+        LogUtil.d(TAG, "W="+targetW + " , H ="+targetH);
+        if(targetW == 0 || targetH == 0){
+        	targetW = 720;
+        	targetH = 400;
+        }
+        //Get the dimensions of the bitmap
+        BitmapFactory.Options bmOptions = new BitmapFactory.Options();
+        bmOptions.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(photoPath, bmOptions);
+        int photoW = bmOptions.outWidth;
+        int photoH = bmOptions.outHeight;
+
+        //Determine how much to scale down the image
+        int scaleFactor = Math.min(photoW / targetW, photoH / targetH);
+
+        //Decode the image file into a Bitmap sized to fill the View
+        bmOptions.inJustDecodeBounds = false;
+        bmOptions.inSampleSize = scaleFactor;
+        bmOptions.inPurgeable = true;
+
+        Bitmap bitmap = BitmapFactory.decodeFile(photoPath, bmOptions);
+        return bitmap;
+    }
+ 
+/*-------------------------------多媒体文件上传下载-------------------------------*/    
+    private Handler handler = new Handler(){
+        @Override
+        public void handleMessage(Message msg) {
+            switch (msg.what) {
+                case UPLOAD_CANCELLED:
+                	mProgressDialog.dismiss();
+                case UPLOAD_INIT_PROCESS:
+                	mProgressDialog.setMax(msg.arg1);
+                    break;
+                case UPLOAD_IN_PROCESS:
+                	mProgressDialog.setProgress(msg.arg1);
+                    break;
+                case UPLOAD_FILE_DONE:
+                	View mView=LayoutInflater.from(TabhostActivity.this)
+							.inflate(R.layout.dialog_alert, null);
+			    	TextView mAlert=(TextView)mView.findViewById(R.id.alert_tv);
+					AlertDialog.Builder builder=new AlertDialog.Builder(TabhostActivity.this);
+					builder.setTitle("结果提示");
+					builder.setView(mView);
+                	if(msg.arg1 == UploadUtil.UPLOAD_SUCCESS_CODE){
+                		mAlert.setText("上传成功:" + (String)msg.obj + "\n耗时："+UploadUtil.getRequestTime()+"秒");
+                	}else if(msg.arg1 == UploadUtil.UPLOAD_FILE_NOT_EXISTS_CODE){
+                		mAlert.setText("上传失败：文件不存在");
+                	}else if(msg.arg1 == UploadUtil.UPLOAD_SERVER_ERROR_CODE){
+                		mAlert.setText("上传失败:" + (String)msg.obj );
+                	}
+                	builder.setPositiveButton("确定", new DialogInterface.OnClickListener() {
+    					@Override
+    					public void onClick(DialogInterface dialog, int which) {
+    						// TODO Auto-generated method stub
+    						closeDialog(true, dialog);
+    					}
+    				});
+                	builder.create().show();
+                    break;
+                default:
+                    break;
+            }
+            super.handleMessage(msg);
+        }
+
+    };
+    
+    private void toUploadFile(int filetype, String userId, String filepath){
+        mProgressDialog.setTitle("正在上传请等待");
+        mProgressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+        mProgressDialog.setCanceledOnTouchOutside(false);
+        mProgressDialog.setProgressNumberFormat("%1d kb/%2d kb");
+        mProgressDialog.setButton(ProgressDialog.BUTTON_NEGATIVE, "取消", new DialogInterface.OnClickListener() {
+			
+			@Override
+			public void onClick(DialogInterface dialog, int which) {
+				// TODO Auto-generated method stub
+				Message errMsg = new Message();
+				errMsg.arg1 = UPLOAD_CANCELLED;
+				handler.sendMessage(errMsg);
+			}
+		} );
+        mProgressDialog.show();
+        String fileKey = "image";
+        if(filetype == FileUtil.MEDIA_TYPE_AUDIO){
+        	fileKey = "audio";
+        }
+        String requestURL = new StringBuilder(FILE_UPLOAD_URL)
+        					.append(fileKey).append("?name=").append(userId).toString();
+        UploadUtil uploadUtil = UploadUtil.getInstance();;
+        uploadUtil.setOnUploadProcessListener(this);  //设置监听器监听上传状态
+
+        Map<String, String> params = new HashMap<String, String>();
+        params.put("userId", userId);
+        uploadUtil.uploadFile( filepath, fileKey, requestURL, params);
+    }
+    
+    /**
+     * 上传服务器响应回调
+     */
+    @Override
+    public void onUploadDone(int responseCode, String message) {
+    	mProgressDialog.dismiss();
+        Message msg = Message.obtain();
+        msg.what = UPLOAD_FILE_DONE;
+        msg.arg1 = responseCode;
+        msg.obj = message;
+        LogUtil.d(TAG, "DONE:"+(String)msg.obj);
+        handler.sendMessage(msg);
+    }
+    
+    @Override
+    public void onUploadProcess(int uploadSize) {
+        Message msg = Message.obtain();
+        msg.what = UPLOAD_IN_PROCESS;
+        msg.arg1 = uploadSize/1024;  //byte到kb的转换，存在四舍五入
+        LogUtil.d(TAG, "PROC:"+msg.arg1);
+        handler.sendMessage(msg );
+    }
+
+    @Override
+    public void initUpload(int fileSize) {
+        Message msg = Message.obtain();
+        msg.what = UPLOAD_INIT_PROCESS;
+        msg.arg1 = fileSize/1024;
+        LogUtil.d(TAG, "INIT:"+msg.arg1);
+        handler.sendMessage(msg );
+    }
+
+    
 /*-------------------------------通过条形码扫描查询-------------------------------*/   
     /**
      * 开启扫描条码页面
@@ -317,25 +777,65 @@ public class TabhostActivity extends Activity implements OnClickListener,
         startActivityForResult(intent,flag);
     }
     
-    /**
-     * 对CaptureActivity返回的扫描结果做处理
-     */
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-    	// TODO Auto-generated method stub
-    	super.onActivityResult(requestCode, resultCode, data);
-    	if (resultCode==1) {
-    		Bundle bundle=data.getExtras();
-   		 	String scan_result=bundle.getString("scan_result").trim();
-   		 	LogUtil.i(TAG, "scan_result="+scan_result+", requestCode="+requestCode);
-   		 	if( scan_result!=null && !"".equals(scan_result)){
-   		 		//requestCode为1表示返回的scan_result是用户ID,为3表示返回的是表计局号
-   		 		queryData(scan_result, requestCode);
-   		 		searchFlag=0;
-   		 	}
-    	}
-    }
 /*------------------------------显示多种搜索方式的对话框----------------------------*/	
+    /**
+	 * 用一个对话框显示搜索方式，让用户选择
+	 */
+	private void showMediaDialog(final int type, String filename){
+		if(filename!=null && !filename.equals("") && !filename.equals("无")){
+			int start = filename.indexOf("_");
+			int end = filename.indexOf(".");
+			if(start < 0 || start > end){
+				return ;
+			}
+			final String userId = filename.substring(start + 1, end);
+			final String filepath = FileUtil.getFilePath(type, userId);
+			File file = FileUtil.isFileExist(filepath);
+			View mView=LayoutInflater.from(TabhostActivity.this)
+					.inflate(R.layout.dialog_alert, null);
+	    	TextView mAlert=(TextView)mView.findViewById(R.id.alert_tv);
+			AlertDialog.Builder builder=new AlertDialog.Builder(TabhostActivity.this);
+			builder.setTitle("文件信息");
+			builder.setView(mView);
+			if(file != null){
+				long time = file.lastModified();
+				String lastModifiedTime = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).format(new Date(time));
+				String size = FileUtil.getFileSize(filepath);
+	            LogUtil.d(TAG, "time = " + lastModifiedTime + ", size = "+size);
+		    	
+				mAlert.setText("修改时间："+lastModifiedTime + "\n"+"文件大小："+size);
+				builder.setPositiveButton("上传文件", new DialogInterface.OnClickListener() {
+					@Override
+					public void onClick(DialogInterface dialog, int which) {
+						// TODO Auto-generated method stub
+						toUploadFile(type, userId, filepath);
+						closeDialog(true, dialog);
+					}
+				});
+				if(type == FileUtil.MEDIA_TYPE_AUDIO){
+					builder.setNeutralButton("播放语音", new DialogInterface.OnClickListener() {
+						@Override
+						public void onClick(DialogInterface dialog, int which) {
+							// TODO Auto-generated method stub
+							playAudio(filepath);
+						}
+					});
+				}
+			}else{
+				mAlert.setText("没有文件");
+			}
+			builder.setNegativeButton("关闭窗口", new DialogInterface.OnClickListener() {
+				
+				@Override
+				public void onClick(DialogInterface dialog, int which) {
+					// TODO Auto-generated method stub
+					
+				}
+			});
+			builder.create().show();
+		}
+	}
+	
 	/**
 	 * 用一个对话框显示搜索方式，让用户选择
 	 */
@@ -717,6 +1217,7 @@ public class TabhostActivity extends Activity implements OnClickListener,
         mCoordinateTextView.setText(addr_lng+" , "+addr_lat);
         mUserAddrEditText.setText(user_addr==null?"地址为空，请输入详细地址":user_addr);
         mRemarksEditText.setText(remarks==null?"如有故障，请添加详细描述":remarks);
+        readMediaFiles(user_id);
     }
     
     /**

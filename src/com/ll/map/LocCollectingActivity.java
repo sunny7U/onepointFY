@@ -142,6 +142,9 @@ public class LocCollectingActivity extends Activity implements AMapLocationListe
         super.onPause();
         LogUtil.d(TAG, "onPause");
         mapView.onPause();
+        if(mLocationClient != null){
+        	mLocationClient.stopLocation();
+        }
     }
 
     /**
