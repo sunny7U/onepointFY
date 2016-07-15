@@ -6,6 +6,7 @@ import android.app.ProgressDialog;
 import android.content.ContentValues;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.graphics.Bitmap;
@@ -19,6 +20,7 @@ import android.os.Handler;
 import android.os.Message;
 import android.provider.MediaStore;
 import android.text.Html;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
@@ -56,6 +58,7 @@ import java.util.Locale;
 import java.util.Map;
 
 
+
 import com.amap.api.mapcore.util.bu;
 import com.amap.api.maps.model.LatLng;
 import com.amap.api.maps.offlinemap.file.Utility;
@@ -67,6 +70,7 @@ import com.ll.utils.FileUtil;
 import com.ll.utils.PoiItem;
 import com.ll.utils.ToastUtil;
 import com.ll.utils.UploadUtil;
+import com.ll.utils.VolleyUtil;
 import com.ll.R;
 
 /**
@@ -111,12 +115,17 @@ public class TabhostActivity extends Activity implements OnClickListener,
      * 取消上传
      */
     public static final int UPLOAD_CANCELLED = 6;
-    /***
-     * 这里的这个URL是我服务器的javaEE环境URL
+    /**
+     * 图片上传的URL
      */
-    public static String FILE_UPLOAD_URL = "http://10.8.165.213:8080/api/";
-
-    
+//    public static String FILE_UPLOAD_URL = "http://10.0.0.7:8000/api/";
+//    /**
+//     * 图片下载的URL
+//     */
+//    public static String FILE_DOWNLOAD_URL = "http://10.0.0.7:8000/api/";
+    private String FILE_URL;
+    private SharedPreferences preference;
+    private SharedPreferences.Editor editor;
     
     String point; //用于记录当前显示出来的经纬度点
     double[] lnglat=new double[2];
@@ -153,6 +162,7 @@ public class TabhostActivity extends Activity implements OnClickListener,
     private ImageView mImageView;
     private ProgressDialog mProgressDialog;
     private TextView mHint;
+    private Button mDownload;
     
     //第二个tab页，以其他位置为采集点
     private EditText mLocDescEditText;
@@ -177,6 +187,12 @@ public class TabhostActivity extends Activity implements OnClickListener,
         setContentView(R.layout.activity_add_point);
 
         dbHelper=new MyDatabaseHelper(this,  "Locations.db", null, 2);
+        preference=getSharedPreferences("updatetime", MODE_MULTI_PROCESS);
+        editor=preference.edit();
+        FILE_URL = preference.getString("addrHead", "http://") + 
+        		preference.getString("serverIP", "121.199.75.35") + 
+        		preference.getString("addrTail", ":8000/api/");
+        Log.d(TAG, FILE_URL);
         initViews();
     }
 
@@ -329,6 +345,8 @@ public class TabhostActivity extends Activity implements OnClickListener,
         mAudioButton=(Button)findViewById(R.id.record_audio_btn);
         mImageView=(ImageView)findViewById(R.id.imgae_iv);
         mImageView.setVisibility(View.GONE);
+        mDownload=(Button)findViewById(R.id.download_media_btn);
+        mDownload.setOnClickListener(this);
         
         mSearchUserButton.setOnClickListener(this);
         mRelocateButton.setOnClickListener(this);
@@ -480,6 +498,9 @@ public class TabhostActivity extends Activity implements OnClickListener,
             	showMediaDialog(FileUtil.MEDIA_TYPE_AUDIO
             			, mAudioTextView.getText().toString().trim());
             	break;
+            case R.id.download_media_btn:
+            	//应该在每次查询一个新用户时调用
+            	toDownloadFile(mUserIdTextView.getText().toString().trim());
             default:
                 break;
         }
@@ -497,6 +518,7 @@ public class TabhostActivity extends Activity implements OnClickListener,
                 File photoFile = FileUtil.getOutputMediaFile(FileUtil.MEDIA_TYPE_IMAGE, user_id);
                 if(photoFile != null) {
                 	mCurrentFile = photoFile;
+                	LogUtil.d(TAG, "filename="+photoFile.getName());
                 }
                 // Continue only if the File was successfully created
                 if (photoFile != null) {
@@ -652,6 +674,12 @@ public class TabhostActivity extends Activity implements OnClickListener,
         bmOptions.inPurgeable = true;
 
         Bitmap bitmap = BitmapFactory.decodeFile(photoPath, bmOptions);
+        try{
+        	FileUtil.saveFile(bitmap, photoPath);
+        }catch(Exception e){
+        	e.printStackTrace();
+        }
+        
         return bitmap;
     }
  
@@ -719,7 +747,7 @@ public class TabhostActivity extends Activity implements OnClickListener,
         if(filetype == FileUtil.MEDIA_TYPE_AUDIO){
         	fileKey = "audio";
         }
-        String requestURL = new StringBuilder(FILE_UPLOAD_URL)
+        String requestURL = new StringBuilder(FILE_URL)
         					.append(fileKey).append("?name=").append(userId).toString();
         UploadUtil uploadUtil = UploadUtil.getInstance();;
         uploadUtil.setOnUploadProcessListener(this);  //设置监听器监听上传状态
@@ -761,7 +789,15 @@ public class TabhostActivity extends Activity implements OnClickListener,
         handler.sendMessage(msg );
     }
 
-    
+    public void toDownloadFile(String userId){
+    	if(userId == null && userId.equals("")){
+    		return;
+    	}
+//    	//1、用Volley下载Json
+    	VolleyUtil.getJson(TabhostActivity.this, FILE_URL + "image?name=" + userId, mImageView, userId, FileUtil.MEDIA_TYPE_IMAGE);
+    	
+    	VolleyUtil.getJson(TabhostActivity.this, FILE_URL + "audio?name=" + userId, null, userId, FileUtil.MEDIA_TYPE_AUDIO);
+    }
 /*-------------------------------通过条形码扫描查询-------------------------------*/   
     /**
      * 开启扫描条码页面

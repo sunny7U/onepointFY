@@ -6,6 +6,7 @@ import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.util.Log;
+import android.widget.ImageView;
 
 
 
@@ -501,5 +502,61 @@ public class JsonUtils {
         	if(db!=null&&db.isOpen())
 	            db.close();
         }
+    }
+    
+    /**
+     * 向服务器POST数据之后得到的响应，反映服务器接收情况
+     */
+    public static String[] parseDownloadJSON(Context context, 
+    		JSONArray response, 
+    		ImageView iv, 
+    		final String userId,
+    		int mediaType){
+        String[] msgs=new String[2];
+        try {
+        	if(response != null && response.length() > 0){
+        		for(int i = 0; i < response.length(); i++){
+        			if(mediaType == FileUtil.MEDIA_TYPE_IMAGE){
+        				final String imageUrl = response.getString(i);
+        				LogUtil.d(TAG, "toLoadImage="+imageUrl);
+////                		//1、用Volley下载图片
+//                		VolleyUtil.getImage(context, imageUrl, iv);
+                		//2、也可以用Http下载文件的方式
+                		new Thread(new Runnable(){
+
+							@Override
+							public void run() {
+								// TODO Auto-generated method stub
+								LogUtil.d(TAG, "xxxxx");
+								HttpUtils.downloadFile(imageUrl, FileUtil.MEDIA_TYPE_IMAGE, userId);
+							}
+                			
+                		}).start();
+                    	
+        			}else if (mediaType == FileUtil.MEDIA_TYPE_AUDIO){
+        				final String audioUrl = response.getString(i);
+        				LogUtil.d(TAG, "toLoadAudio="+audioUrl);
+                		//2、也可以用Http下载文件的方式
+        				new Thread(new Runnable(){
+
+							@Override
+							public void run() {
+								// TODO Auto-generated method stub
+								HttpUtils.downloadFile(audioUrl, FileUtil.MEDIA_TYPE_AUDIO, userId);
+							}
+        					
+        				}).start();
+                    	
+        			}
+            	}
+        	}
+        	
+        } catch (Exception e) {
+            // TODO: handle exception
+            LogUtil.d("parseJSON", "响应结果解析异常");
+            e.printStackTrace();
+        }
+        LogUtil.d("parseJSON", msgs.toString());
+        return msgs;
     }
 }

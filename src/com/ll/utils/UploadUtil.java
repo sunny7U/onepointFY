@@ -2,11 +2,14 @@ package com.ll.utils;
 
 import android.util.Log;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.SocketTimeoutException;
@@ -46,7 +49,7 @@ public class UploadUtil {
     }
 
     private static final String TAG = "UploadUtils";
-    private int readTimeOut = 10 * 1000; // 读取超时
+    private int readTimeOut = 10* 1000; // 读取超时
     private int connectTimeout = 10 * 1000; // 超时时间
     /***
      * 请求使用多长时间
@@ -154,7 +157,8 @@ public class UploadUtil {
             /**
              * 当文件不为空，把文件包装并且上传
              */
-            DataOutputStream dos = new DataOutputStream(conn.getOutputStream());
+//            DataOutputStream dos = new DataOutputStream(conn.getOutputStream());
+            OutputStream dos = new BufferedOutputStream(conn.getOutputStream());
             StringBuffer sb;
             String params;
 
@@ -174,7 +178,7 @@ public class UploadUtil {
                     params = sb.toString();
                     LogUtil.i(TAG, key+"="+params+"##");
                     dos.write(params.getBytes());
-//                  dos.flush();
+                    dos.flush();
                 }
             }
 
@@ -188,9 +192,9 @@ public class UploadUtil {
                     + "\"; filename=\"" + file.getName() + "\"" + LINE_END);
             // 这里配置的Content-type很重要的 ，用于服务器端辨别文件的类型的
             if(fileKey.equals("image")){
-            	sb.append("Content-Type:image/jpeg" + LINE_END);
+            	sb.append("Content-Type:application/x-jpg" + LINE_END);
             }else if(fileKey.equals("audio")){
-            	sb.append("Content-Type:audio/mp3" + LINE_END);
+            	sb.append("Content-Type:audio/Amr" + LINE_END);
             }
             
             sb.append(LINE_END);
@@ -210,25 +214,28 @@ public class UploadUtil {
                 dos.write(bytes, 0, len);
                 onUploadProcessListener.onUploadProcess(curLen);
             }
+            LogUtil.d(TAG, "lll");
             is.close();
 
             dos.write(LINE_END.getBytes());
+            LogUtil.d(TAG, "ll2");
             byte[] end_data = (PREFIX + BOUNDARY + PREFIX + LINE_END).getBytes();
             dos.write(end_data);
-//            dos.flush();
-//            dos.close();
-//
-//          dos.write(tempOutputStream.toByteArray());
+            dos.flush();
+            dos.close();
+            LogUtil.d(TAG, "ll3");
             /**
              * 获取响应码 200=成功 当响应成功，获取响应的流
              */
             int res = conn.getResponseCode();
+            LogUtil.d(TAG, "res"+res);
             responseTime = System.currentTimeMillis();
             this.requestTime = (int) ((responseTime-requestTime)/1000);
             LogUtil.e(TAG, "response code:" + res);
             if (res == 200) {
             	LogUtil.e(TAG, "request success");
-                InputStream input = conn.getInputStream();
+//                InputStream input = conn.getInputStream();
+                InputStream input = new BufferedInputStream(conn.getInputStream());
                 StringBuffer sb1 = new StringBuffer();
                 int ss;
                 while ((ss = input.read()) != -1) {

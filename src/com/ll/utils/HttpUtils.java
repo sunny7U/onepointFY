@@ -1,5 +1,12 @@
 package com.ll.utils;
 
+import java.io.File;
+import java.io.InputStream;
+import java.net.URI;
+import java.net.URL;
+
+import javax.net.ssl.HttpsURLConnection;
+
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
@@ -146,4 +153,14 @@ public class HttpUtils {
 
     }
 
+    public static void downloadFile(final String urlStr, int type, String userId){
+    	try{
+    		File file = FileUtil.createFile(type, userId);
+    		URL url = new URL(urlStr);
+    		FileUtil.write2SDFromInput(file , url.openStream());
+    	}catch(Exception e){
+    		e.printStackTrace();
+    	}
+    	
+    }
 }
