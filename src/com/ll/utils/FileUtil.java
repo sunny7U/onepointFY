@@ -12,6 +12,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 import java.util.Formatter.BigDecimalLayoutForm;
+import java.util.Random;
 
 import com.ll.data.TabhostActivity;
 
@@ -26,8 +27,9 @@ public class FileUtil {
 	public static final int MEDIA_TYPE_IMAGE = 1;
     public static final int MEDIA_TYPE_AUDIO = 2;
     private static final String FILE_PATH = "/HZ/";
-    private static final String PHOTO_PATH = "/photos";
-    private static final String AUDIO_PATH = "/audios";
+    private static final String PHOTO_PATH = "/photos/";
+    private static final String AUDIO_PATH = "/audios/";
+    private static final int NUM_OF_FILES = 1;
 	
     /**
      * 根据type和user_id生成对应的文件（图片或语音）
@@ -75,7 +77,7 @@ public class FileUtil {
      */
     public static String getFileDir(int filetype, String user_id){
 		StringBuilder filepath = new StringBuilder(getSdCardPath()+FILE_PATH + user_id + File.separator);
-
+		LogUtil.d(TAG, "filedir="+filepath);
 		return filepath.toString();
     }
     /**
@@ -89,7 +91,7 @@ public class FileUtil {
 		if(filetype == MEDIA_TYPE_IMAGE){
 			filepath.append("IMG_" + user_id + ".jpg");
 		}else if(filetype == MEDIA_TYPE_AUDIO){
-			filepath.append("AUD_" + user_id +  ".amr");
+			filepath.append("AUD_" + user_id + ".amr");
 		}
 		return filepath.toString();
     }
@@ -100,13 +102,11 @@ public class FileUtil {
      * @return  文件存在时返回文件，否则返回null
      */
     public static File isFileExist(int filetype, String user_id){
-//    	String dirPath = getFileDir(filetype, user_id);
-    	
     	String filepath = getFilePath(filetype, user_id);
     	if(filepath !=null && !filepath.equals("")){
     		try{
     			File file = new File(filepath);
-        		if(file.exists()){
+        		if(file.exists() && file.isFile()){
         			return file;
         		}
     		}catch (Exception E){
@@ -177,7 +177,7 @@ public class FileUtil {
     	if(filepath !=null && !filepath.equals("")){
     		try{
     			File file = new File(filepath);
-        		if(file.exists()){
+        		if(file.exists() && file.isFile()){
         			return file;
         		}
     		}catch (Exception E){
@@ -190,44 +190,37 @@ public class FileUtil {
      * 若该文件已经存在，则直接返回
      */
     public static File createFile(int filetype, String user_id){
-    	File file = isFileExist(filetype, user_id);
-    	String filepath = getFileDir(filetype, user_id);
-    	if(file == null){
-        	if(filepath !=null && !filepath.equals("")){
-        		try{
-        			file = new File(filepath);
-        			if(!file.exists()){
-        				file.mkdirs();
-        			}
-        		}catch (Exception E){
-        			E.printStackTrace();
-        		}
-        	}
-		}
+    	String filedir = getFileDir(filetype, user_id);
+    	File file = new File(filedir);    	
     	try{
-	    	if(filetype == MEDIA_TYPE_IMAGE){
-				file = new File(filepath, "IMG_" + user_id + ".jpg");
-			}else if(filetype == MEDIA_TYPE_AUDIO){
-				file = new File(filepath, "AUD_" + user_id +  ".amr");
-			}
-			if(file.exists()){
-				file.delete();
-			}
-			file.setWritable(true);
-			file.createNewFile();
-			file.setLastModified(System.currentTimeMillis());
+    		if(!file.exists() && !file.mkdirs()){
+    			return null;
+    		}
+    		if(file.isDirectory()){
+    			if(filetype == MEDIA_TYPE_IMAGE){
+    				file = new File(filedir, "IMG_" + user_id + ".jpg");
+    			}else if(filetype == MEDIA_TYPE_AUDIO){
+    				file = new File(filedir, "AUD_" + user_id + ".amr");
+    			}
+    			if(file.exists()){
+    				file.delete();
+    			}
+    			file.setWritable(true);
+    			file.createNewFile();
+    			file.setLastModified(System.currentTimeMillis());
+    		}
     	}catch(Exception e){
-    		e.printStackTrace();
+    		LogUtil.e(TAG, e.getMessage());
     	}
     	LogUtil.d(TAG, "createFile="+file.getAbsolutePath());
-    	LogUtil.d(TAG, "isFileExist="+file.exists()+"isFile="+file.isFile());
+    	LogUtil.d(TAG, "isFileExist="+file.exists()+", isFile="+file.isFile());
 		return file;
     }
     
     /**
      * 将一个InputStream里面的数据写入到SD卡中
      */
-    public static File write2SDFromInput(File file, InputStream input) {
+    public static synchronized File write2SDFromInput(File file, InputStream input) {
 //        File file = null;
     	if(file == null || !file.exists()){
     		LogUtil.e(TAG, "file is null");

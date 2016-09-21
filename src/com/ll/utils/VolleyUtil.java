@@ -30,10 +30,10 @@ public class VolleyUtil {
 	private static RequestQueue mQueue;
 	
 	public static void getJson(final Context context, 
-			String urlStr, 
-			final ImageView iv, 
+			String urlStr,  
 			final String userId,
-			final int mediaType){
+			final int mediaType,
+			final HttpCallbackListener listener){
 		//获取一个RequestQueue对象，请求队列对象可以缓存所有HTTP请求，并按照一定算法并发的发出这些请求
 		if(mQueue == null){
 			mQueue = Volley.newRequestQueue(context);
@@ -44,7 +44,7 @@ public class VolleyUtil {
 							public void onResponse(JSONArray response) {
 								// TODO Auto-generated method stub
 								//在响应成功的回调里打印服务器返回的内容
-								JsonUtils.parseDownloadJSON(context, response, iv, userId, mediaType);
+								JsonUtils.parseDownloadJSON(context, response, userId, mediaType, listener);
 								Log.d("TAG","响应成功" + response.toString());
 							}
 				}, 
@@ -56,38 +56,6 @@ public class VolleyUtil {
 						Log.e("TAG","发生错误" + error.getMessage(), error);
 					}
 				});
-		//用JsonObjectRequest和JsonArrayRequest
-//		JsonObjectRequest jsonObjectRequest = new JsonObjectRequest(urlStr,
-//				null,
-//				new Response.Listener<JSONObject>() {
-//					public void onResponse(JSONObject response){
-//						//在响应成功的回调里打印服务器返回的内容
-//						JsonUtils.parseDownloadJSON(context, response, iv, userId, mediaType);
-//						Log.d("TAG","响应成功" + response.toString());
-//					}
-//				}, new Response.ErrorListener() {
-//					public void onErrorResponse(VolleyError error){
-//						Log.e("TAG","发生错误" + error.getMessage(), error);
-//					}
-//				});
-//		
-//		StringRequest str = new StringRequest(urlStr,
-//				new Response.Listener<String>() {
-//
-//					@Override
-//					public void onResponse(String response) {
-//						// TODO Auto-generated method stub
-//						Log.d("TAG","响应成功" + response.toString());
-//					}
-//				}, 
-//				new Response.ErrorListener() {
-//
-//					@Override
-//					public void onErrorResponse(VolleyError error) {
-//						// TODO Auto-generated method stub
-//						Log.e("TAG","发生错误" + error.getMessage(), error);
-//					}
-//				});
 		mQueue.add(jsonArrayRequest);
 	}
 	

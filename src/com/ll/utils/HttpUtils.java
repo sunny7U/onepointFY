@@ -153,13 +153,18 @@ public class HttpUtils {
 
     }
 
-    public static void downloadFile(final String urlStr, int type, String userId){
+    public static void downloadFile(final String urlStr, int type, String userId, HttpCallbackListener listener){
     	try{
-    		File file = FileUtil.createFile(type, userId);
+    		File file = FileUtil.getOutputMediaFile(type, userId);
     		URL url = new URL(urlStr);
-    		FileUtil.write2SDFromInput(file , url.openStream());
+    		if(FileUtil.write2SDFromInput(file , url.openStream()) != null){
+    			listener.onFinish(type+";" + file.getAbsolutePath());
+    		}else{
+    			listener.onError("no file to download");
+    		}
+    		
     	}catch(Exception e){
-    		e.printStackTrace();
+    		listener.onError(e);
     	}
     	
     }

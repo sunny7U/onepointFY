@@ -65,6 +65,7 @@ import com.amap.api.maps.offlinemap.file.Utility;
 import com.ll.Zxing.CaptureActivity;
 import com.ll.data.SearchResultDialog.OnListItemClick;
 import com.ll.utils.AMapUtil;
+import com.ll.utils.HttpCallbackListener;
 import com.ll.utils.LogUtil;
 import com.ll.utils.FileUtil;
 import com.ll.utils.PoiItem;
@@ -162,7 +163,8 @@ public class TabhostActivity extends Activity implements OnClickListener,
     private ImageView mImageView;
     private ProgressDialog mProgressDialog;
     private TextView mHint;
-    private Button mDownload;
+    private Button mDownloadPhoto;
+    private Button mDownloadAudio;
     
     //第二个tab页，以其他位置为采集点
     private EditText mLocDescEditText;
@@ -345,8 +347,10 @@ public class TabhostActivity extends Activity implements OnClickListener,
         mAudioButton=(Button)findViewById(R.id.record_audio_btn);
         mImageView=(ImageView)findViewById(R.id.imgae_iv);
         mImageView.setVisibility(View.GONE);
-        mDownload=(Button)findViewById(R.id.download_media_btn);
-        mDownload.setOnClickListener(this);
+        mDownloadPhoto=(Button)findViewById(R.id.download_photo_btn);
+        mDownloadPhoto.setOnClickListener(this);
+        mDownloadAudio=(Button)findViewById(R.id.download_audio_btn);
+        mDownloadAudio.setOnClickListener(this);
         
         mSearchUserButton.setOnClickListener(this);
         mRelocateButton.setOnClickListener(this);
@@ -498,9 +502,15 @@ public class TabhostActivity extends Activity implements OnClickListener,
             	showMediaDialog(FileUtil.MEDIA_TYPE_AUDIO
             			, mAudioTextView.getText().toString().trim());
             	break;
-            case R.id.download_media_btn:
-            	//应该在每次查询一个新用户时调用
-            	toDownloadFile(mUserIdTextView.getText().toString().trim());
+//            case R.id.download_photo_btn:
+//            	//应该在每次查询一个新用户时调用
+//            	toDownloadFiles(mUserIdTextView.getText().toString().trim(),
+//            			FileUtil.MEDIA_TYPE_IMAGE, new mDownloadListener());
+//            	
+//            case R.id.download_audio_btn:
+//            	//应该在每次查询一个新用户时调用
+//            	toDownloadFiles(mUserIdTextView.getText().toString().trim(),
+//            			FileUtil.MEDIA_TYPE_AUDIO, new mDownloadListener());
             default:
                 break;
         }
@@ -608,14 +618,9 @@ public class TabhostActivity extends Activity implements OnClickListener,
         }
     }
     
-    /**
-     * 根据用户id去查询是否存在关于该用户的图片和语音，有则呈现资料地址
-     * @param user_id
-     */
-    private void readMediaFiles(String user_id){
-    	if(user_id != null && !user_id.equals("")){
-    		File photofile = FileUtil.isFileExist(FileUtil.MEDIA_TYPE_IMAGE, user_id);
-    		File audiofile = FileUtil.isFileExist(FileUtil.MEDIA_TYPE_AUDIO, user_id);
+    private void readMedisFiles(int filetype, String filepath){
+    	if(filetype == FileUtil.MEDIA_TYPE_IMAGE){
+    		File photofile = FileUtil.isFileExist(filepath);
     		if(photofile != null){
     			mPhotoTextView.setText(Html.fromHtml("<u>"+photofile.getName()+"</u>"));
     			mPhotoTextView.setTextColor(getResources().getColor(R.color.light_blue));
@@ -629,6 +634,8 @@ public class TabhostActivity extends Activity implements OnClickListener,
     			mPhotoTextView.setTextColor(getResources().getColor(R.color.contents_text));
     			mPhotoTextView.setClickable(false);
     		}
+    	}else{
+    		File audiofile = FileUtil.isFileExist(filepath);
     		if(audiofile != null){
     			mAudioTextView.setText(Html.fromHtml("<u>"+audiofile.getName()+"</u>"));
         		mAudioTextView.setTextColor(getResources().getColor(R.color.light_blue));
@@ -638,6 +645,45 @@ public class TabhostActivity extends Activity implements OnClickListener,
     			mAudioTextView.setText(R.string.nothing);
     			mAudioTextView.setTextColor(getResources().getColor(R.color.contents_text));
     			mAudioTextView.setClickable(false);
+    		}
+    	}
+    }
+    
+    /**
+     * 根据用户id去查询是否存在关于该用户的图片和语音，有则呈现资料地址
+     * @param user_id
+     */
+    private void readMediaFiles(String user_id){
+    	if(user_id != null && !user_id.equals("")){
+    		File photofile = FileUtil.isFileExist(FileUtil.MEDIA_TYPE_IMAGE, user_id);
+    		File audiofile = FileUtil.isFileExist(FileUtil.MEDIA_TYPE_AUDIO, user_id);
+    		//如果本地有，就展示本地照片；否则去下载服务器端照片
+    		if(photofile != null){
+    			LogUtil.d(TAG, "local image");
+    			mPhotoTextView.setText(Html.fromHtml("<u>"+photofile.getName()+"</u>"));
+    			mPhotoTextView.setTextColor(getResources().getColor(R.color.light_blue));
+    			mPhotoTextView.setClickable(true);
+    			mPhotoTextView.setOnClickListener(TabhostActivity.this);
+    			mImageView.setVisibility(View.VISIBLE);
+    			mImageView.setImageBitmap(loadImageFromFile(photofile.getAbsolutePath()));
+    		}else{
+    			LogUtil.d(TAG, "download image");
+    			mImageView.setVisibility(View.GONE);
+    			mPhotoTextView.setText(R.string.nothing);
+    			mPhotoTextView.setTextColor(getResources().getColor(R.color.contents_text));
+    			mPhotoTextView.setClickable(false);
+    			toDownloadFiles(user_id, FileUtil.MEDIA_TYPE_IMAGE, new mDownloadListener());
+    		}
+    		if(audiofile != null){
+    			mAudioTextView.setText(Html.fromHtml("<u>"+audiofile.getName()+"</u>"));
+        		mAudioTextView.setTextColor(getResources().getColor(R.color.light_blue));
+        		mAudioTextView.setClickable(true);
+        		mAudioTextView.setOnClickListener(TabhostActivity.this);
+    		}else{
+    			mAudioTextView.setText(R.string.nothing);
+    			mAudioTextView.setTextColor(getResources().getColor(R.color.contents_text));
+    			mAudioTextView.setClickable(false);
+    			toDownloadFiles(user_id, FileUtil.MEDIA_TYPE_AUDIO, new mDownloadListener());
     		}
     	}
     }
@@ -788,15 +834,39 @@ public class TabhostActivity extends Activity implements OnClickListener,
         LogUtil.d(TAG, "INIT:"+msg.arg1);
         handler.sendMessage(msg );
     }
+    
+    public class mDownloadListener implements HttpCallbackListener{
 
-    public void toDownloadFile(String userId){
-    	if(userId == null && userId.equals("")){
+		@Override
+		public void onFinish(String response) {
+			// TODO Auto-generated method stub
+			String[] result = response.split(";");
+			readMedisFiles(Integer.parseInt(result[0]), result[1]);
+		}
+
+		@Override
+		public void onError(Exception e) {
+			// TODO Auto-generated method stub
+			LogUtil.e(TAG, e.getMessage());
+		}
+
+		@Override
+		public void onError(String response) {
+			// TODO Auto-generated method stub
+			LogUtil.d(TAG, response);
+		}
+    	
+    }
+    
+    public void toDownloadFiles(String userId, int filetype, HttpCallbackListener downloadListener){
+    	if(userId == null || userId.equals("")){
     		return;
     	}
-//    	//1、用Volley下载Json
-    	VolleyUtil.getJson(TabhostActivity.this, FILE_URL + "image?name=" + userId, mImageView, userId, FileUtil.MEDIA_TYPE_IMAGE);
-    	
-    	VolleyUtil.getJson(TabhostActivity.this, FILE_URL + "audio?name=" + userId, null, userId, FileUtil.MEDIA_TYPE_AUDIO);
+    	if(filetype == FileUtil.MEDIA_TYPE_IMAGE){
+    		VolleyUtil.getJson(TabhostActivity.this, FILE_URL + "image?name=" + userId, userId, FileUtil.MEDIA_TYPE_IMAGE, downloadListener);
+    	}else if(filetype == FileUtil.MEDIA_TYPE_AUDIO){
+    		VolleyUtil.getJson(TabhostActivity.this, FILE_URL + "audio?name=" + userId, userId, FileUtil.MEDIA_TYPE_AUDIO, downloadListener);
+    	}
     }
 /*-------------------------------通过条形码扫描查询-------------------------------*/   
     /**
@@ -1271,4 +1341,5 @@ public class TabhostActivity extends Activity implements OnClickListener,
         	mCoordinateTextView2.setText(currLatLng.longitude+" , "+currLatLng.latitude);
         }
     }
+
 }
